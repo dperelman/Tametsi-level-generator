@@ -401,7 +401,7 @@ function fixupRegions() {
   // (2) Go through all regions and position lines between circles.
 
   for (const node of Object.values(nodes)) {
-    const numRegions = node.regions.length
+    const numRegions = node.regions.filter(r => r.pos !== undefined).length
     if (numRegions === 0) continue
 
     // TODO Better way to fit regions?
@@ -420,7 +420,7 @@ function fixupRegions() {
 
     let rowNum = 0
     let colNum = 0
-    node.regions.forEach(r => {
+    node.regions.filter(r => r.pos !== undefined).forEach(r => {
       r.pos.x = tx+colNum*size
       r.pos.y = ty+rowNum*size
       r.pos.size = size
@@ -470,24 +470,26 @@ function updateRegionsToRemove(node) {
       continue;
     }
 
-    r.layers.remove()
-    const nes = r.region.display.nodesAndEdges
-    let i = nes.findIndex(ne => ne.node === node)
-    const line = nes[i].lineFromPrev
-    if (line) line.remove()
-    nes.splice(i, 1)
-    if (nes[0].lineFromPrev) {
-      nes[0].lineFromPrev.remove()
-      nes[0].lineFromPrev = undefined
-    }
-
     if (valueAdjustment) {
       r.region.value += valueAdjustment
-      setRegionLabel(r.region)
+      if (r.region.label) setRegionLabel(r.region)
     }
 
-    for (const ne of nes) {
-      ne.text.innerHTML = r.region.label
+    if (r.layers) r.layers.remove()
+    if (r.region.display) {
+      const nes = r.region.display.nodesAndEdges
+      let i = nes.findIndex(ne => ne.node === node)
+      const line = nes[i].lineFromPrev
+      if (line) line.remove()
+      nes.splice(i, 1)
+      if (nes[0].lineFromPrev) {
+        nes[0].lineFromPrev.remove()
+        nes[0].lineFromPrev = undefined
+      }
+
+      for (const ne of nes) {
+        ne.text.innerHTML = r.region.label
+      }
     }
   }
 
@@ -559,11 +561,14 @@ function generateRegionForNode(node) {
     let neighbor = nodes[neighborId]
     if (!neighbor.revealed && !neighbor.flagged) coveredNodes.push(neighbor)
   })
+  if (coveredNodes.length === 0) return
 
   const region = {
     value: node.mineCount - node.flaggedCount,
     kind: RegionKinds.EXACT,
-    nodes: coveredNodes
+    nodes: coveredNodes,
+    sourceKind: 'node',
+    source: node,
   }
 
   regions.push(region)
@@ -576,15 +581,21 @@ function generateRegionForHint(hint) {
     let node = nodes[nodeId]
     if (!node.revealed && !node.flagged) coveredNodes.push(node)
   })
+  if (coveredNodes.length === 0) return
 
   const region = {
     value: hint.mineCount - hint.flaggedCount,
     kind: RegionKinds.EXACT,
-    nodes: coveredNodes
+    nodes: coveredNodes,
+    sourceKind: 'hint',
+    source: hint,
   }
 
   regions.push(region)
-  // Do not display hint regions.
+  // Do not display hint regions, but still have backreferences.
+  for (const node of coveredNodes) {
+    node.regions.push({region, layers: undefined, pos: undefined})
+  }
 }
 
 hints.color.forEach(generateRegionForHint)
@@ -596,6 +607,21 @@ for (const node of Object.values(nodes)) {
   generateRegionForNode(node);
 }
 fixupRegions()
+
+function applyRegionRules() {
+  // TODO Support importing rules
+  for (const r of regions) {
+    if (r.kind === RegionKinds.EXACT && r.value === 0) {
+      for (const covered of r.nodes) {
+        setRevealed(covered, true)
+      }
+    } else if (r.kind === RegionKinds.EXACT && r.value === r.nodes.length) {
+      for (const covered of r.nodes) {
+        setFlagged(covered, true)
+      }
+    }
+  }
+}
 
 let height = (maxY - minY) + 5 * minDist
 let width = Math.max((maxX - minX) + 10 * minDist, height * 16 / 9)
