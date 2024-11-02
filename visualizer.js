@@ -809,20 +809,6 @@ function applyRegionRules() {
   }
 
   return false
-
-  /*
-  // TODO Support importing rules
-  for (const r of regions) {
-    if (r.kind === RegionKinds.EXACT && r.value === 0) {
-      for (const covered of r.nodes) {
-        setRevealed(covered, true)
-      }
-    } else if (r.kind === RegionKinds.EXACT && r.value === r.nodes.length) {
-      for (const covered of r.nodes) {
-        setFlagged(covered, true)
-      }
-    }
-  }*/
 }
 
 let height = (maxY - minY) + 5 * minDist
