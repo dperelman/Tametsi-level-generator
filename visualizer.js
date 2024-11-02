@@ -829,9 +829,23 @@ function applyRegionRules() {
           if (numNodes > square_value) return false
         } else if (square_count.kind === RegionKinds.AT_LEAST) {
           if (numNodes < square_value) return false
+        } else if (square_count.kind === RegionKinds.OR_PLUS_1) {
+          if (numNodes != square_value && numNodes != square_value + 1) return false
+        } else if (square_count.kind === RegionKinds.OR_PLUS_1_2) {
+          if (numNodes != square_value && numNodes != square_value + 1 && numNodes != square_value + 2) return false
+        } else if (square_count.kind === RegionKinds.OR_PLUS_2_4) {
+          if (numNodes != square_value && numNodes != square_value + 2 && numNodes != square_value + 4) return false
+        } else if (square_count.kind === RegionKinds.OR_PLUS_2_4_6) {
+          if (numNodes != square_value && numNodes != square_value + 2 && numNodes != square_value + 4 && numNodes != square_value + 6) return false
+        } else if (square_count.kind === RegionKinds.OR_PLUS_2_MULTIPLE) {
+          if (numNodes < square_value || ((numNodes - square_value) % 2) !== 0) return false
+        } else if (square_count.kind === RegionKinds.OR_PLUS_2) {
+          if (numNodes != square_value && numNodes != square_value + 2) return false
+        } else if (square_count.kind === RegionKinds.OR_PLUS_3) {
+          if (numNodes != square_value && numNodes != square_value + 3) return false
         } else {
           // Unsupported kind? TODO Support all kinds
-          return false
+          throw new Error("Unsupported region kind: " + square_count.kind)
         }
       }
 
