@@ -110,10 +110,15 @@ function setRevealed(node, revealed) {
     return
   node.revealed = revealed
 
-  if (node.revealed)
+  if (node.revealed) {
     $$(`#tile${node.id}`).setAttribute('fill', 'rgba(0, 0, 0, 0)')
-  else
+    generateRegionForNode(node)
+    updateRegionsToRemove(node)
+  }
+  else {
     $$(`#tile${node.id}`).setAttribute('fill', node.color)
+    // Redoing regions for unrevealing node is unsupported.
+  }
 }
 
 function setFlagged(node, flagged) {
@@ -121,10 +126,14 @@ function setFlagged(node, flagged) {
     return
   node.flagged = flagged
 
-  if (node.flagged)
+  if (node.flagged) {
     $$(`#tile${node.id}`).setAttribute('fill', 'white')
-  else
+    updateRegionsToRemove(node)
+  }
+  else {
     $$(`#tile${node.id}`).setAttribute('fill', node.color)
+    // Redoing regions for unflagging node is unsupported.
+  }
 
   node.edges.forEach(neighborId => {
     let neighbor = nodes[neighborId]
@@ -160,13 +169,16 @@ function tileClick(event) {
   if (event.which == 1) {
     // left click, reveals a tile
     setRevealed(node, true)
-  } else if (event.which == 2) {
+  }
+  // Don't allow clearing reveal/flag because it doesn't make sense
+  //  with regions and is hard to support.
+  /*else if (event.which == 2) {
     // middle click, not used in-game but used here to clear state
     setRevealed(node, false)
     setFlagged(node, false)
-  } else if (event.which == 3) {
+  }*/ else if (event.which == 3) {
     // right click, flags a tile
-    setFlagged(node, !node.flagged)
+    setFlagged(node, /*!node.flagged*/true)
   }
 }
 
@@ -437,6 +449,52 @@ function fixupRegions() {
   }
 }
 
+function setRegionLabel(region) {
+  region.label = region.kind === RegionKinds.EXACT
+    ? region.value.toString()
+    : region.kind.description.replace('X', region.value.toString())
+}
+
+function updateRegionsToRemove(node) {
+  const valueAdjustment = node.revealed && !node.has_mine ? 0 : -1
+
+  for (const r of node.regions) {
+    r.region.nodes.splice(r.region.nodes.indexOf(node), 1)
+
+    // If region is now empty, remove it entirely.
+    if (r.region.nodes.length === 0) {
+      regions.splice(regions.indexOf(r.region), 1)
+      if (r.region.display) {
+        r.region.display.g.remove()
+      }
+      continue;
+    }
+
+    r.layers.remove()
+    const nes = r.region.display.nodesAndEdges
+    let i = nes.findIndex(ne => ne.node === node)
+    const line = nes[i].lineFromPrev
+    if (line) line.remove()
+    nes.splice(i, 1)
+    if (nes[0].lineFromPrev) {
+      nes[0].lineFromPrev.remove()
+      nes[0].lineFromPrev = undefined
+    }
+
+    if (valueAdjustment) {
+      r.region.value += valueAdjustment
+      setRegionLabel(r.region)
+    }
+
+    for (const ne of nes) {
+      ne.text.innerHTML = r.region.label
+    }
+  }
+
+  node.regions = []
+  fixupRegions()
+}
+
 // From https://stackoverflow.com/a/1484514
 function getRandomColor() {
   var letters = '0123456789AB';
@@ -448,9 +506,7 @@ function getRandomColor() {
 }
 
 function displayRegion(region) {
-  region.label = region.kind === RegionKinds.EXACT
-    ? region.value.toString()
-    : region.kind.description.replace('X', region.value.toString())
+  setRegionLabel(region)
 
   const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
   const col = getRandomColor()
@@ -479,9 +535,9 @@ function displayRegion(region) {
     layers.append(text)
 
     const pos = {x: undefined, y: undefined, size: undefined}
-    node.regions.push({layers, pos})
+    node.regions.push({region, layers, pos})
 
-    region.display.nodesAndEdges.push({pos, layers, lineFromPrev})
+    region.display.nodesAndEdges.push({node, pos, layers, text, lineFromPrev})
 
     lineFromPrev = document.createElementNS('http://www.w3.org/2000/svg', 'line')
     lineFromPrev.setAttribute('stroke-width', 3)
@@ -495,26 +551,49 @@ function displayRegion(region) {
 
 let regions = [];
 
-// TODO Update regions
-// TODO Regions from column/color hints (don't display as they're in
-//        the UI already?)
-for (const node of Object.values(nodes)) {
-  if (!node.revealed || node.has_mine || node.secret) continue
+function generateRegionForNode(node) {
+  if (!node.revealed || node.has_mine || node.secret) return
 
   const coveredNodes = []
   node.edges.forEach(neighborId => {
     let neighbor = nodes[neighborId]
-    if (!neighbor.revealed) coveredNodes.push(neighbor)
+    if (!neighbor.revealed && !neighbor.flagged) coveredNodes.push(neighbor)
   })
 
   const region = {
-    value: node.mineCount,
+    value: node.mineCount - node.flaggedCount,
     kind: RegionKinds.EXACT,
     nodes: coveredNodes
   }
 
   regions.push(region)
   displayRegion(region)
+}
+
+function generateRegionForHint(hint) {
+  const coveredNodes = []
+  hint.ids.forEach(nodeId => {
+    let node = nodes[nodeId]
+    if (!node.revealed && !node.flagged) coveredNodes.push(node)
+  })
+
+  const region = {
+    value: hint.mineCount - hint.flaggedCount,
+    kind: RegionKinds.EXACT,
+    nodes: coveredNodes
+  }
+
+  regions.push(region)
+  // Do not display hint regions.
+}
+
+hints.color.forEach(generateRegionForHint)
+hints.column.forEach(generateRegionForHint)
+
+for (const node of Object.values(nodes)) {
+  if (!node.revealed || node.has_mine || node.secret) continue
+
+  generateRegionForNode(node);
 }
 fixupRegions()
 
