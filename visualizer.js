@@ -844,7 +844,7 @@ function applyRegionRules() {
         } else if (square_count.kind === RegionKinds.OR_PLUS_3) {
           if (numNodes != square_value && numNodes != square_value + 3) return false
         } else {
-          // Unsupported kind? TODO Support all kinds
+          // Should be unreachable.
           throw new Error("Unsupported region kind: " + square_count.kind)
         }
       }
