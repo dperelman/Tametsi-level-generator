@@ -67,6 +67,7 @@ nodesSrc.forEach(nodeSrc => {
   node.revealed = realBool(extract(nodeSrc, 'REVEALED', /.+/))  // tiles that start cleared
   node.flagged = false
   node.color = 'gray'
+  node.regions = []
 })
 
 let hints = {column: [], color: []}
@@ -250,6 +251,9 @@ nodeIds.forEach(nodeId => {
   })
   minDist = Math.min(minDist, minPointDist)
 
+  node.geometryInfo = {tileMinX, tileMaxX, tileMinY, tileMaxY, minPointDist,
+    width: tileMaxX - tileMinX, height: tileMaxY - tileMinY}
+
   tile.setAttribute('fill', !node.revealed ? node.color : 'rgba(0, 0, 0, 0)')
   tile.setAttribute('stroke', 'lightgray')
 
@@ -362,6 +366,157 @@ hints.color.forEach((hint, index) => {
 
   colorGroup.append(text)
 })
+
+const RegionKinds = Object.freeze({
+  WILD: Symbol("?"),
+  EXACT: Symbol("=X"),
+  AT_MOST: Symbol("X-"),
+  AT_LEAST: Symbol("X+"),
+  OR_PLUS_2: Symbol("X/X+2"),
+  OR_PLUS_3: Symbol("X/X+3"),
+  OR_PLUS_2_4: Symbol("X/X+2/X+4"),
+  OR_PLUS_2_4_6: Symbol("X/X+2/X+4/X+6"),
+  NOT: Symbol("!X"),
+  OR_PLUS_2_MULTIPLE: Symbol("X+2*"),
+  OR_PLUS_1: Symbol("X/X+1"),
+  OR_PLUS_1_2: Symbol("X/X+1/X+2"),
+})
+
+let regionGroup = $$('#svg-regions')
+
+function fixupRegions() {
+  // (1) Go through all nodes and position region circles;
+  // (2) Go through all regions and position lines between circles.
+
+  for (const node of Object.values(nodes)) {
+    const numRegions = node.regions.length
+    if (numRegions === 0) continue
+
+    // TODO Better way to fit regions?
+    // Select largest rectangle that fits inside tile.
+    // ... well, actually just approximate that.
+    const w = node.geometryInfo.width * 0.8
+    const h = node.geometryInfo.height * 0.8
+
+    const tx = node.pos.x + node.geometryInfo.tileMinX + w/8
+    const ty = node.pos.y + node.geometryInfo.tileMinY + h/8
+
+    // select rows to maximize size (s)
+    const numRows = Math.floor(h/w * numRegions)
+    const numPerRow = numRegions / numRows
+    const size = h / numRows
+
+    let rowNum = 0
+    let colNum = 0
+    node.regions.forEach(r => {
+      r.pos.x = tx+colNum*size
+      r.pos.y = ty+rowNum*size
+      r.pos.size = size
+      r.layers.setAttribute('transform', `translate(${r.pos.x},${r.pos.y}) scale(${size})`)
+
+      if (++colNum > numPerRow) {
+        colNum = 0
+        ++rowNum
+      }
+    })
+  }
+
+  for (const region of regions) {
+    if (!region.display) continue
+    for (let i = 1; i < region.display.nodesAndEdges.length; i++) {
+      const prevPos = region.display.nodesAndEdges[i-1].pos
+      const current = region.display.nodesAndEdges[i]
+      const currentPos = current.pos
+      const line = current.lineFromPrev
+
+      line.setAttribute('x1', prevPos.x + prevPos.size/2)
+      line.setAttribute('y1', prevPos.y + prevPos.size/2)
+      line.setAttribute('x2', currentPos.x + currentPos.size/2)
+      line.setAttribute('y2', currentPos.y + currentPos.size/2)
+    }
+  }
+}
+
+// From https://stackoverflow.com/a/1484514
+function getRandomColor() {
+  var letters = '0123456789AB';
+  var color = '#';
+  for (var i = 0; i < 6; i++) {
+    color += letters[Math.floor(Math.random() * 12)];
+  }
+  return color;
+}
+
+function displayRegion(region) {
+  region.label = region.kind === RegionKinds.EXACT
+    ? region.value.toString()
+    : region.kind.description.replace('X', region.value.toString())
+
+  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+  const col = getRandomColor()
+  g.setAttribute('fill', col)
+  g.setAttribute('stroke', 2)
+  regionGroup.append(g)
+  region.display = { g, nodesAndEdges: [] }
+
+  let lineFromPrev = undefined
+  region.nodes.forEach(node => {
+    let layers = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+    let circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+    circle.setAttribute('cx', 0.5)
+    circle.setAttribute('cy', 0.5)
+    circle.setAttribute('r', 0.5)
+    let text = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+    text.innerHTML = region.label
+    text.setAttribute('x', 0.5)
+    text.setAttribute('y', 0.5)
+    text.setAttribute('fill', 'darkgrey')
+    text.setAttribute('dominant-baseline', 'middle')
+    text.setAttribute('text-anchor', 'middle')
+    text.setAttribute('font-size', `1px`)
+
+    layers.append(circle)
+    layers.append(text)
+
+    const pos = {x: undefined, y: undefined, size: undefined}
+    node.regions.push({layers, pos})
+
+    region.display.nodesAndEdges.push({pos, layers, lineFromPrev})
+
+    lineFromPrev = document.createElementNS('http://www.w3.org/2000/svg', 'line')
+    lineFromPrev.setAttribute('stroke-width', 3)
+    lineFromPrev.setAttribute('stroke', col)
+  })
+
+  // Add all at end to get lines below labels.
+  region.display.nodesAndEdges.forEach(ne => g.append(ne.lineFromPrev));
+  region.display.nodesAndEdges.forEach(ne => g.append(ne.layers));
+}
+
+let regions = [];
+
+// TODO Update regions
+// TODO Regions from column/color hints (don't display as they're in
+//        the UI already?)
+for (const node of Object.values(nodes)) {
+  if (!node.revealed || node.has_mine || node.secret) continue
+
+  const coveredNodes = []
+  node.edges.forEach(neighborId => {
+    let neighbor = nodes[neighborId]
+    if (!neighbor.revealed) coveredNodes.push(neighbor)
+  })
+
+  const region = {
+    value: node.mineCount,
+    kind: RegionKinds.EXACT,
+    nodes: coveredNodes
+  }
+
+  regions.push(region)
+  displayRegion(region)
+}
+fixupRegions()
 
 let height = (maxY - minY) + 5 * minDist
 let width = Math.max((maxX - minX) + 10 * minDist, height * 16 / 9)
