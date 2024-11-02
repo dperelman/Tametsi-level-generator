@@ -392,7 +392,26 @@ const RegionKinds = Object.freeze({
   OR_PLUS_2_MULTIPLE: Symbol("X+2*"),
   OR_PLUS_1: Symbol("X/X+1"),
   OR_PLUS_1_2: Symbol("X/X+1/X+2"),
+
+  MARK_CELL: Symbol("MARK_CELL"),
+  CHANGE_VISIBILITY: Symbol("CHANGE_VISIBILITY"),
 })
+const RegionKindsEnum = [
+  RegionKinds.WILD,
+  RegionKinds.EXACT,
+  RegionKinds.AT_MOST,
+  RegionKinds.AT_LEAST,
+  RegionKinds.OR_PLUS_2,
+  RegionKinds.OR_PLUS_3,
+  RegionKinds.OR_PLUS_2_4,
+  RegionKinds.OR_PLUS_2_4_6,
+  RegionKinds.NOT,
+  RegionKinds.OR_PLUS_2_MULTIPLE,
+  RegionKinds.OR_PLUS_1,
+  RegionKinds.OR_PLUS_1_2,
+]
+RegionKindsEnum[100] = RegionKinds.MARK_CELL
+RegionKindsEnum[101] = RegionKinds.CHANGE_VISIBILITY
 
 let regionGroup = $$('#svg-regions')
 
@@ -547,7 +566,9 @@ function displayRegion(region) {
   })
 
   // Add all at end to get lines below labels.
-  region.display.nodesAndEdges.forEach(ne => g.append(ne.lineFromPrev));
+  region.display.nodesAndEdges.forEach(ne => {
+    if (ne.lineFromPrev) g.append(ne.lineFromPrev)
+  });
   region.display.nodesAndEdges.forEach(ne => g.append(ne.layers));
 }
 
@@ -608,7 +629,179 @@ for (const node of Object.values(nodes)) {
 }
 fixupRegions()
 
+function loadRules() {
+  const varBitmasks = []
+  for (let mask = 0; mask < (1 << 6); mask++) {
+    const arr = []
+    for (let i = 0; i < 6; i++) {
+      if (mask & (1 << i)) arr.push(i)
+    }
+    varBitmasks[mask] = arr
+  }
+  function interpret_bombe_region(num) {
+    const value = num & 0xff
+    num >>= 8
+    const kind = RegionKindsEnum[num & 0xff]
+    num >>= 8
+    const varBitmask = num & 0xff
+    return { value, kind, vars: varBitmasks[varBitmask] }
+  }
+
+  return rules_from_bombe.rules.map(b => {
+    return {
+      bombe_rule: b,
+      apply_region_type: interpret_bombe_region(b.apply_region_type),
+      region_type: b.region_type.map(interpret_bombe_region),
+      square_counts: b.square_counts.map(interpret_bombe_region),
+    }
+  }).filter(r => !r.bombe_rule.paused)
+}
+const rules = loadRules()
+
+
+function hide_region(region) {
+  if (!region.display) return false
+  for (const node of region.nodes) {
+    const info = node.regions.find(r => r.region === region)
+    info.pos = undefined
+    info.layers = undefined
+  }
+  region.display.g.remove()
+  region.display = undefined
+  return true
+}
+
+function trash_region(region) {
+  for (const node of region.nodes) {
+    node.regions.splice(node.regions.findIndex(r => r.region === region), 1)
+  }
+  if (region.display) region.display.g.remove()
+  regions.splice(regions.indexOf(region), 1)
+}
+
 function applyRegionRules() {
+  for (const rule of rules) {
+    let proposedRegions = [{regions: []}]
+    for (const region_type of rule.region_type) {
+      const nextProposedRegions = []
+      for (const prefix of proposedRegions) {
+        for (const region of regions) {
+          // Does region match region_type and can it be added to prefix?
+          if (region_type.kind === RegionKinds.WILD) {
+            nextProposedRegions.push({...prefix, regions: [...prefix.regions, region]})
+          }
+          if (region.kind !== region_type.kind) continue
+          if (region_type.vars.length > 0) {
+            // TODO Support variables
+          } else if (region_type.value === region.value) {
+            nextProposedRegions.push({...prefix, regions: [...prefix.regions, region]})
+          }
+        }
+      }
+      proposedRegions = nextProposedRegions
+    }
+
+    function selectNodes(proposed) {
+      const nodesByMask = []
+      for (let mask = 0; mask < rule.square_counts.length; mask++) {
+        nodesByMask[mask] = []
+      }
+
+      const nodesByRegion = proposed.regions.map(r => new Set(r.nodes))
+      const allNodes = nodesByRegion.reduce((a, b) => a.union(b))
+      for (const node of allNodes) {
+        let mask = 0
+        for (let i = 0; i < nodesByRegion.length; i++) {
+          mask |= nodesByRegion[i].has(node) ? (1 << i) : 0
+        }
+        nodesByMask[mask].push(node)
+      }
+      return nodesByMask
+    }
+
+    // Check square counts
+    proposedRegions = proposedRegions.filter(proposed => {
+      proposed.nodes = selectNodes(proposed)
+
+      for (let i = 0; i < rule.square_counts.length; i++) {
+        const square_count = rule.square_counts[i]
+        // TODO support variables
+        if (square_count.vars.length > 0) return false
+        const numNodes = proposed.nodes.length
+
+        if (square_count.kind === RegionKinds.WILD) {
+          // Anything is okay.
+        } else if (square_count.kind === RegionKinds.EXACT) {
+          // TODO variables?
+          if (numNodes !== square_count.value) return false
+        } else {
+          // Unsupported kind? TODO Support all kinds
+          return false
+        }
+      }
+
+      return true
+    })
+
+    // If there's any remaining regions, apply rule to the first set.
+    for (const proposed of proposedRegions) {
+      const proposed = proposedRegions[0]
+      let newRegion = undefined
+
+      if (rule.apply_region_type.kind === RegionKinds.CHANGE_VISIBILITY) {
+        const hide = rule.apply_region_type.value === 1
+        const trash = rule.apply_region_type.value === 2
+        let anyHidden = false
+        for (let i = 0; i < proposed.regions.length; i++) {
+          if (rule.bombe_rule.apply_region_bitmap & (1 << i)) {
+            if (hide) {
+              anyHidden |= hide_region(proposed.regions[i])
+            }
+            if (trash) trash_region(proposed.regions[i])
+          }
+        }
+        if (hide && !anyHidden) continue
+      } else {
+        const nodesToApply = []
+        for (let i = 0; i < rule.square_counts.length; i++) {
+          if (rule.bombe_rule.apply_region_bitmap & (1 << i)) {
+            nodesToApply.push(...proposed.nodes[i])
+          }
+        }
+        if (nodesToApply.length === 0) continue
+
+        if (rule.apply_region_type.kind === RegionKinds.MARK_CELL) {
+          if (rule.apply_region_type.value === 0) {
+            for (const node in nodesToApply) setRevealed(node, true)
+          } else if (rule.apply_region_type.value === 1) {
+            for (const node in nodesToApply) setFlagged(node, true)
+          } else {
+            throw new Exception("Unexpected MARK_CELL value: " + rule.apply_region_type.value)
+          }
+        } else {
+          newRegion = {
+            value: rule.apply_region_type.value + rule.apply_region_type.vars.map(i => proposed.vars[i]).reduce((a, b) => a+b, 0),
+            kind: rule.apply_region_type.kind,
+            nodes: nodesToApply,
+            sourceKind: 'rule',
+            source: {rule, predecessors: proposed},
+          }
+          const nodesSet = new Set(nodesToApply)
+          // Check if region already exists
+          if (regions.findIndex(r => r.value === newRegion.value && r.kind === newRegion.kind && r.nodes.length === newRegion.nodes.length && nodesSet.isSubsetOf(new Set(r.nodes))) !== -1) continue
+          // TODO Should region.nodes always be a Set?
+
+          regions.push(newRegion)
+          displayRegion(newRegion)
+        }
+      }
+      return { rule, newRegion }
+    }
+  }
+
+  return false
+
+  /*
   // TODO Support importing rules
   for (const r of regions) {
     if (r.kind === RegionKinds.EXACT && r.value === 0) {
@@ -620,7 +813,7 @@ function applyRegionRules() {
         setFlagged(covered, true)
       }
     }
-  }
+  }*/
 }
 
 let height = (maxY - minY) + 5 * minDist
