@@ -649,11 +649,14 @@ function loadRules() {
   }
 
   return rules_from_bombe.rules.map(b => {
+    const square_counts = b.square_counts.map(interpret_bombe_region)
+    const region_type = b.region_type.map(interpret_bombe_region)
     return {
       bombe_rule: b,
       apply_region_type: interpret_bombe_region(b.apply_region_type),
-      region_type: b.region_type.map(interpret_bombe_region),
-      square_counts: b.square_counts.map(interpret_bombe_region),
+      region_type,
+      square_counts,
+      square_counts_vars: square_counts.map(s => new Set(s.vars)).reduce((a, b) => a.union(b))
     }
   }).filter(r => !r.bombe_rule.paused)
 }
@@ -682,6 +685,44 @@ function trash_region(region) {
   trashed_regions.push(region)
 }
 
+// Brute force enumerate all valid variable assignments
+function enumerableVariableAssignments(args) {
+  // argument as object to not get confused over argument order
+  const varsSumTo = args.matchedValue - args.pattern.value
+  const existingVars = args.existingVars ?? [{}]
+  const newVars = existingVars.flatMap(vars => {
+    let remainingVarsSumTo = varsSumTo
+    let remainingVars = []
+    for (const neededVar of args.pattern.vars) {
+      const existing = vars[neededVar]
+      if (existing === undefined) {
+        remainingVars.push(neededVar)
+      } else {
+        remainingVarsSumTo -= existing
+      }
+    }
+
+    function withAllSumsTo(vars, remainingVars, remainingVarsSumTo) {
+      if (remainingVars.length === 0 && remainingVarsSumTo === 0) return [vars]
+      else if (remainingVarsSumTo < 0) return []
+      else if (remainingVars.length === 0) return []
+
+      const newRemainingVars = remainingVars.slice(1)
+      const res = []
+      for (let i = 0; i <= remainingVarsSumTo; i++) {
+        const newVars = {...vars}
+        newVars[remainingVars[0]] = i
+        res.push(...withAllSumsTo(newVars, newRemainingVars, remainingVarsSumTo - i))
+      }
+      return res
+    }
+
+    return withAllSumsTo(vars, remainingVars, remainingVarsSumTo)
+  })
+
+  return newVars
+}
+
 function applyRegionRules() {
   for (const rule of rules) {
     let proposedRegions = [{regions: []}]
@@ -695,7 +736,17 @@ function applyRegionRules() {
           }
           if (region.kind !== region_type.kind) continue
           if (region_type.vars.length > 0) {
-            // TODO Support variables
+            const newVars = enumerableVariableAssignments({
+              matchedValue: region.value,
+              pattern: region_type,
+              existingVars: prefix.possibleVars,
+            })
+
+            if (newVars.length > 0) {
+              nextProposedRegions.push({...prefix,
+                possibleVars: newVars,
+                regions: [...prefix.regions, region]})
+            }
           } else if (region_type.value === region.value) {
             nextProposedRegions.push({...prefix, regions: [...prefix.regions, region]})
           }
@@ -726,22 +777,56 @@ function applyRegionRules() {
     proposedRegions = proposedRegions.filter(proposed => {
       proposed.nodes = selectNodes(proposed)
 
+      if (rule.square_counts_vars.size > 0 && !proposed.possibleVars) {
+        proposed.possibleVars = [{}]
+      }
+
+      if (proposed.possibleVars) {
+        if (proposed.possibleVars.length === 0) {
+          // Shouldn't get here... but definitely invalid if we do.
+          return false
+        } else if (proposed.possibleVars.length > 1 || rule.square_counts_vars.isSubsetOf(new Set(Object.keys(proposed.possibleVars[0])))) {
+          // Should be able to fix all var values using exact regions.
+          for (let i = 0; i < rule.square_counts.length; i++) {
+            const square_count = rule.square_counts[i]
+            const numNodes = proposed.nodes[i].length
+
+            if (square_count.vars.length === 0) continue
+            if (square_count.kind !== RegionKinds.EXACT) continue
+
+            const newVars = enumerableVariableAssignments({
+              matchedValue: numNodes,
+              pattern: square_count,
+              existingVars: proposed.possibleVars,
+            })
+
+            if (newVars.length === 0) return false
+            proposed.possibleVars = newVars
+          }
+        }
+
+        if (proposed.possibleVars.length > 1) {
+          throw new Error("Unbounded variables?")
+        } else {
+          proposed.vars = proposed.possibleVars[0]
+        }
+      }
+
       for (let i = 0; i < rule.square_counts.length; i++) {
         const square_count = rule.square_counts[i]
-        // TODO support variables
-        if (square_count.vars.length > 0) return false
         const numNodes = proposed.nodes[i].length
+        const square_value = square_count.value + square_count.vars.map(v => proposed.vars[v]).reduce((a,b) => a+b, 0)
 
         if (square_count.kind === RegionKinds.WILD) {
           // Anything is okay.
         } else if (square_count.kind === RegionKinds.EXACT) {
-          if (numNodes !== square_count.value) return false
+          if (numNodes !== square_value) return false
         } else if (square_count.kind === RegionKinds.NOT) {
-          if (numNodes === square_count.value) return false
+          if (numNodes === square_value) return false
         } else if (square_count.kind === RegionKinds.AT_MOST) {
-          if (numNodes > square_count.value) return false
+          if (numNodes > square_value) return false
         } else if (square_count.kind === RegionKinds.AT_LEAST) {
-          if (numNodes < square_count.value) return false
+          if (numNodes < square_value) return false
         } else {
           // Unsupported kind? TODO Support all kinds
           return false
@@ -783,11 +868,12 @@ function applyRegionRules() {
           } else if (rule.apply_region_type.value === 1) {
             for (const node of nodesToApply) setFlagged(node, true)
           } else {
-            throw new Exception("Unexpected MARK_CELL value: " + rule.apply_region_type.value)
+            throw new Error("Unexpected MARK_CELL value: " + rule.apply_region_type.value)
           }
         } else {
+          const newRegionValue = rule.apply_region_type.value + rule.apply_region_type.vars.map(i => proposed.vars[i]).reduce((a, b) => a+b, 0)
           newRegion = {
-            value: rule.apply_region_type.value + rule.apply_region_type.vars.map(i => proposed.vars[i]).reduce((a, b) => a+b, 0),
+            value: newRegionValue,
             kind: rule.apply_region_type.kind,
             nodes: nodesToApply,
             sourceKind: 'rule',
