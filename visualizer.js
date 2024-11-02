@@ -672,12 +672,14 @@ function hide_region(region) {
   return true
 }
 
+trashed_regions = []
 function trash_region(region) {
   for (const node of region.nodes) {
     node.regions.splice(node.regions.findIndex(r => r.region === region), 1)
   }
   if (region.display) region.display.g.remove()
   regions.splice(regions.indexOf(region), 1)
+  trashed_regions.push(region)
 }
 
 function applyRegionRules() {
@@ -728,13 +730,18 @@ function applyRegionRules() {
         const square_count = rule.square_counts[i]
         // TODO support variables
         if (square_count.vars.length > 0) return false
-        const numNodes = proposed.nodes.length
+        const numNodes = proposed.nodes[i].length
 
         if (square_count.kind === RegionKinds.WILD) {
           // Anything is okay.
         } else if (square_count.kind === RegionKinds.EXACT) {
-          // TODO variables?
           if (numNodes !== square_count.value) return false
+        } else if (square_count.kind === RegionKinds.NOT) {
+          if (numNodes === square_count.value) return false
+        } else if (square_count.kind === RegionKinds.AT_MOST) {
+          if (numNodes > square_count.value) return false
+        } else if (square_count.kind === RegionKinds.AT_LEAST) {
+          if (numNodes < square_count.value) return false
         } else {
           // Unsupported kind? TODO Support all kinds
           return false
@@ -746,7 +753,6 @@ function applyRegionRules() {
 
     // If there's any remaining regions, apply rule to the first set.
     for (const proposed of proposedRegions) {
-      const proposed = proposedRegions[0]
       let newRegion = undefined
 
       if (rule.apply_region_type.kind === RegionKinds.CHANGE_VISIBILITY) {
@@ -773,9 +779,9 @@ function applyRegionRules() {
 
         if (rule.apply_region_type.kind === RegionKinds.MARK_CELL) {
           if (rule.apply_region_type.value === 0) {
-            for (const node in nodesToApply) setRevealed(node, true)
+            for (const node of nodesToApply) setRevealed(node, true)
           } else if (rule.apply_region_type.value === 1) {
-            for (const node in nodesToApply) setFlagged(node, true)
+            for (const node of nodesToApply) setFlagged(node, true)
           } else {
             throw new Exception("Unexpected MARK_CELL value: " + rule.apply_region_type.value)
           }
@@ -790,10 +796,12 @@ function applyRegionRules() {
           const nodesSet = new Set(nodesToApply)
           // Check if region already exists
           if (regions.findIndex(r => r.value === newRegion.value && r.kind === newRegion.kind && r.nodes.length === newRegion.nodes.length && nodesSet.isSubsetOf(new Set(r.nodes))) !== -1) continue
+          if (trashed_regions.findIndex(r => r.value === newRegion.value && r.kind === newRegion.kind && r.nodes.length === newRegion.nodes.length && nodesSet.isSubsetOf(new Set(r.nodes))) !== -1) continue
           // TODO Should region.nodes always be a Set?
 
           regions.push(newRegion)
           displayRegion(newRegion)
+          fixupRegions() // TODO if calling this many times, maybe wait?
         }
       }
       return { rule, newRegion }
