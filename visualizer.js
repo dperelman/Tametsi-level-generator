@@ -519,10 +519,10 @@ function updateRegionsToRemove(node) {
 
 // From https://stackoverflow.com/a/1484514
 function getRandomColor() {
-  var letters = '0123456789AB';
+  var letters = '0123456789';
   var color = '#';
   for (var i = 0; i < 6; i++) {
-    color += letters[Math.floor(Math.random() * 12)];
+    color += letters[Math.floor(Math.random() * 10)];
   }
   return color;
 }
@@ -552,6 +552,8 @@ function displayRegion(region) {
     text.setAttribute('dominant-baseline', 'middle')
     text.setAttribute('text-anchor', 'middle')
     text.setAttribute('font-size', `1px`)
+    text.setAttribute('textLength', `0.8px`)
+    text.setAttribute('lengthAdjust', `spacingAndGlyphs`)
 
     layers.append(circle)
     layers.append(text)
