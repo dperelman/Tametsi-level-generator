@@ -429,13 +429,14 @@ function fixupRegions() {
     const w = node.geometryInfo.width * 0.8
     const h = node.geometryInfo.height * 0.8
 
-    const tx = node.pos.x + node.geometryInfo.tileMinX + w/8
-    const ty = node.pos.y + node.geometryInfo.tileMinY + h/8
+    const tx = node.pos.x + node.geometryInfo.tileMinX + node.geometryInfo.width*0.1
+    const ty = node.pos.y + node.geometryInfo.tileMinY + node.geometryInfo.height*0.1
 
     // select rows to maximize size (s)
-    const numRows = Math.floor(h/w * numRegions)
-    const numPerRow = numRegions / numRows
-    const size = h / numRows
+    let numRows = Math.floor(h/w * Math.sqrt(numRegions))
+    const numPerRow = Math.floor(numRegions / numRows)
+    numRows = Math.ceil(numRegions / numPerRow)
+    const size = Math.min(h / numRows, w / numPerRow)
 
     let rowNum = 0
     let colNum = 0
@@ -445,7 +446,7 @@ function fixupRegions() {
       r.pos.size = size
       r.layers.setAttribute('transform', `translate(${r.pos.x},${r.pos.y}) scale(${size})`)
 
-      if (++colNum > numPerRow) {
+      if (++colNum >= numPerRow) {
         colNum = 0
         ++rowNum
       }
