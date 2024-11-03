@@ -515,6 +515,8 @@ function updateRegionsToRemove(node) {
         ne.text.innerHTML = r.region.label
       }
     }
+
+    enqueRegion(r.region)
   }
 
   node.regions = []
@@ -581,6 +583,8 @@ function displayRegion(region) {
 
 let nextRegionId = 0
 function registerRegion(region) {
+  // Region was re-queued because it was modified.
+  if (region.id !== undefined) return true
   region.id = nextRegionId++
 
   region.nodes = region.nodes.filter(n => {
@@ -829,9 +833,15 @@ function _oneRegionStep() {
         }
       } else if (nextRegion.kind === RegionKinds.MARK_CELL) {
         if (nextRegion.markKind === 'reveal') {
-          for (const node of nextRegion.nodes) setRevealed(node, true)
+          for (const node of nextRegion.nodes) {
+            if (node.has_mine) throw new Error("Regions revealed a mine!")
+            setRevealed(node, true)
+          }
         } else if (nextRegion.markKind === 'flag') {
-          for (const node of nextRegion.nodes) setFlagged(node, true)
+          for (const node of nextRegion.nodes) {
+            if (!node.has_mine) throw new Error("Regions flagged a non-mine!")
+            setFlagged(node, true)
+          }
         } else {
           throw new Error("Unexpected markKind: " + nextRegion.markKind)
         }
