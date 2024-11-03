@@ -160,15 +160,15 @@ function setFlagged(node, flagged) {
 }
 
 function tileClick(event) {
-  if (event.which == 2 || event.which == 3)
-    event.preventDefault()
+  //if (event.which == 2 || event.which == 3)
+    //event.preventDefault()
 
-  let nodeId = event.target.id.slice(4)
-  let node = nodes[nodeId]
+  //let nodeId = event.target.id.slice(4)
+  //let node = nodes[nodeId]
   // console.log(event)
   if (event.which == 1) {
     // left click, reveals a tile
-    setRevealed(node, true)
+    //setRevealed(node, true)
   }
   // Don't allow clearing reveal/flag because it doesn't make sense
   //  with regions and is hard to support.
@@ -178,7 +178,7 @@ function tileClick(event) {
     setFlagged(node, false)
   }*/ else if (event.which == 3) {
     // right click, flags a tile
-    setFlagged(node, /*!node.flagged*/true)
+    //setFlagged(node, /*!node.flagged*/true)
   }
 }
 
@@ -578,6 +578,20 @@ function displayRegion(region) {
 let nextRegionId = 0
 function registerRegion(region) {
   region.id = nextRegionId++
+
+  region.nodes = region.nodes.filter(n => {
+    if (n.flagged || n.revealed && n.has_mine) region.value--
+
+    return !(n.flagged || n.revealed)
+  })
+
+  if (region.nodes.length === 0) return false
+
+  // TODO Is this right?
+  if (region.value < 0) region.value = 0
+
+  if (isExistingRegion(region)) return false
+
   if (region.visible) {
     displayRegion(region)
   } else {
@@ -588,9 +602,10 @@ function registerRegion(region) {
   }
 
   regions.push(region)
+  return true
 }
 
-let regionQueue = [];
+const regionQueue = []
 function enqueRegion(region) {
   if (region.priority === undefined) {
     throw new Error("Region has no priority.");
@@ -606,6 +621,7 @@ function enqueRegion(region) {
 }
 
 function dequeRegion() {
+  if (regionQueue.length === 0) return undefined
   const subQueue = regionQueue[0]
   if (subQueue.queue.length === 1) regionQueue.shift()
   return subQueue.queue.shift()
@@ -633,7 +649,7 @@ function generateRegionForNode(node) {
     priority: 3,
   }
 
-  registerRegion(region)
+  enqueRegion(region)
 }
 
 function generateRegionForHint(hint) {
@@ -654,7 +670,7 @@ function generateRegionForHint(hint) {
     priority: 3,
   }
 
-  registerRegion(region)
+  enqueRegion(region)
 }
 
 hints.color.forEach(generateRegionForHint)
@@ -688,20 +704,24 @@ function loadRules() {
   return rules_from_bombe.rules.map(b => {
     const square_counts = b.square_counts.map(interpret_bombe_region)
     const region_type = b.region_type.map(interpret_bombe_region)
+    const apply_region_type = interpret_bombe_region(b.apply_region_type)
     return {
       bombe_rule: b,
-      apply_region_type: interpret_bombe_region(b.apply_region_type),
+      apply_region_type,
       region_type,
       square_counts,
-      square_counts_vars: square_counts.map(s => new Set(s.vars)).reduce((a, b) => a.union(b))
+      square_counts_vars: square_counts.map(s => new Set(s.vars)).reduce((a, b) => a.union(b)),
+      priority: apply_region_type.kind === RegionKinds.MARK_CELL || apply_region_type.kind === RegionKinds.CHANGE_VISIBILITY ? 3 : b.priority
     }
   }).filter(r => !r.bombe_rule.paused)
 }
 const rules = loadRules()
+const actionRules = rules.filter(r => r.priority === 3)
+const regionRules = rules.filter(r => r.priority !== 3)
 
 
 function hide_region(region) {
-  if (!region.display) return false
+  if (!regions.includes(region) || !region.display) return false
   for (const node of region.nodes) {
     const info = node.regions.find(r => r.region === region)
     info.pos = undefined
@@ -709,17 +729,31 @@ function hide_region(region) {
   }
   region.display.g.remove()
   region.display = undefined
+  region.visible = false
   return true
 }
 
 trashed_regions = []
 function trash_region(region) {
-  for (const node of region.nodes) {
-    node.regions.splice(node.regions.findIndex(r => r.region === region), 1)
-  }
   if (region.display) region.display.g.remove()
+  for (const node of region.nodes) {
+    const idx = node.regions.findIndex(r => r.region === region)
+    if (idx !== -1) node.regions.splice(idx, 1)
+    // TODO This should never happen.
+    //else throw new Error("Region not in display?")
+  }
   regions.splice(regions.indexOf(region), 1)
   trashed_regions.push(region)
+}
+
+function isExistingRegion(newRegion) {
+  const nodesSet = new Set(newRegion.nodes)
+
+  function inRegionList(list) {
+    return list.findIndex(r => r.value === newRegion.value && r.kind === newRegion.kind && r.nodes.length === newRegion.nodes.length && nodesSet.isSubsetOf(new Set(r.nodes))) !== -1
+  }
+
+  return inRegionList(regions) || inRegionList(trashed_regions)
 }
 
 // Brute force enumerate all valid variable assignments
@@ -760,13 +794,75 @@ function enumerableVariableAssignments(args) {
   return newVars
 }
 
-function applyRegionRules() {
+function displayRegionDebugInfo() {
+  document.getElementById("regionDebugInfo").textContent = JSON.stringify({
+    numRegions: regions.length,
+    numVisibleRegions: regions.filter(r => r.visible).length,
+    numHiddenRegions: regions.filter(r => !r.visible).length,
+    numTrashedRegions: trashed_regions.length,
+    queueSizes: regionQueue.map(q => ({priority: q.priority, length: q.queue.length})),
+  }, undefined, 2)
+}
+
+function _oneRegionStep() {
+  let nextRegion;
+  while (nextRegion = dequeRegion()) {
+    if (nextRegion.priority === 4) {
+      // Not really an region, but an action.
+      if (nextRegion.kind === RegionKinds.CHANGE_VISIBILITY) {
+        if (nextRegion.visiblityChangeKind === 'hide') {
+          if (!nextRegion.visiblityChangeRegions.map(hide_region).some(b => b)) {
+            // Didn't actually hide anything, so don't consider this as
+            // having done something.
+            continue
+          }
+        } else if (nextRegion.visiblityChangeKind === 'trash') {
+          nextRegion.visiblityChangeRegions.forEach(trash_region)
+        } else {
+          throw new Error("Unexpected visiblityChangeKind: " + nextRegion.visiblityChangeKind)
+        }
+      } else if (nextRegion.kind === RegionKinds.MARK_CELL) {
+        if (nextRegion.markKind === 'reveal') {
+          for (const node of nextRegion.nodes) setRevealed(node, true)
+        } else if (nextRegion.markKind === 'flag') {
+          for (const node of nextRegion.nodes) setFlagged(node, true)
+        } else {
+          throw new Error("Unexpected markKind: " + nextRegion.markKind)
+        }
+      }
+
+      // Only do one action per step.
+      return
+    }
+
+    if (registerRegion(nextRegion)) break
+  }
+  if (!nextRegion) return
+
+  applyRegionRules(nextRegion)
+}
+
+function oneRegionStep() {
+  _oneRegionStep()
+  fixupRegions()
+  displayRegionDebugInfo()
+}
+
+function applyRegionRules(nextRegion) {
   for (const rule of rules) {
     let proposedRegions = [{regions: []}]
     for (const region_type of rule.region_type) {
       const nextProposedRegions = []
       for (const prefix of proposedRegions) {
         for (const region of regions) {
+          // Can't use a region multiple times.
+          if (prefix.regions.includes(region)) continue
+          // Must use the new region.
+          if (prefix.regions.length === rule.region_type.length - 1 &&
+            !(region === nextRegion || prefix.regions.includes(nextRegion))) {
+            continue
+          }
+
           // Does region match region_type and can it be added to prefix?
           if (region_type.kind === RegionKinds.WILD) {
             nextProposedRegions.push({...prefix, regions: [...prefix.regions, region]})
@@ -842,11 +938,11 @@ function applyRegionRules() {
           }
         }
 
-        if (proposed.possibleVars.length > 1) {
-          throw new Error("Unbounded variables?")
-        } else {
+        //if (proposed.possibleVars.length > 1) {
+          //throw new Error("Unbounded variables?")
+        //} else {
           proposed.vars = proposed.possibleVars[0]
-        }
+        //}
       }
 
       for (let i = 0; i < rule.square_counts.length; i++) {
@@ -892,18 +988,19 @@ function applyRegionRules() {
       let newRegion = undefined
 
       if (rule.apply_region_type.kind === RegionKinds.CHANGE_VISIBILITY) {
-        const hide = rule.apply_region_type.value === 1
-        const trash = rule.apply_region_type.value === 2
-        let anyHidden = false
+        const changedRegions = []
         for (let i = 0; i < proposed.regions.length; i++) {
           if (rule.bombe_rule.apply_region_bitmap & (1 << i)) {
-            if (hide) {
-              anyHidden |= hide_region(proposed.regions[i])
-            }
-            if (trash) trash_region(proposed.regions[i])
+            changedRegions.push (proposed.regions[i])
           }
         }
-        if (hide && !anyHidden) continue
+
+        enqueRegion({
+          kind: RegionKinds.CHANGE_VISIBILITY,
+          visiblityChangeKind: rule.apply_region_type.value === 1 ? 'hide' : 'trash',
+          visiblityChangeRegions: changedRegions,
+          priority: 4,
+        })
       } else {
         const nodesToApply = []
         for (let i = 0; i < rule.square_counts.length; i++) {
@@ -914,13 +1011,12 @@ function applyRegionRules() {
         if (nodesToApply.length === 0) continue
 
         if (rule.apply_region_type.kind === RegionKinds.MARK_CELL) {
-          if (rule.apply_region_type.value === 0) {
-            for (const node of nodesToApply) setRevealed(node, true)
-          } else if (rule.apply_region_type.value === 1) {
-            for (const node of nodesToApply) setFlagged(node, true)
-          } else {
-            throw new Error("Unexpected MARK_CELL value: " + rule.apply_region_type.value)
-          }
+          enqueRegion({
+            kind: RegionKinds.MARK_CELL,
+            markKind: rule.apply_region_type.value === 0 ? 'reveal' : 'flag',
+            nodes: nodesToApply,
+            priority: 4,
+          })
         } else {
           const newRegionValue = rule.apply_region_type.value + rule.apply_region_type.vars.map(i => proposed.vars[i]).reduce((a, b) => a+b, 0)
           newRegion = {
@@ -930,23 +1026,14 @@ function applyRegionRules() {
             sourceKind: 'rule',
             source: {rule, predecessors: proposed},
             visible: true,
-            priority: rule.bombe_rule.priority, // TODO Use region priorities?
+            priority: rule.priority, // TODO Use region priorities?
           }
-          const nodesSet = new Set(nodesToApply)
-          // Check if region already exists
-          if (regions.findIndex(r => r.value === newRegion.value && r.kind === newRegion.kind && r.nodes.length === newRegion.nodes.length && nodesSet.isSubsetOf(new Set(r.nodes))) !== -1) continue
-          if (trashed_regions.findIndex(r => r.value === newRegion.value && r.kind === newRegion.kind && r.nodes.length === newRegion.nodes.length && nodesSet.isSubsetOf(new Set(r.nodes))) !== -1) continue
-          // TODO Should region.nodes always be a Set?
 
-          registerRegion(newRegion)
-          fixupRegions() // TODO if calling this many times, maybe wait?
+          if (!isExistingRegion(newRegion)) enqueRegion(newRegion)
         }
       }
-      return { rule, newRegion }
     }
   }
-
-  return false
 }
 
 let height = (maxY - minY) + 5 * minDist
