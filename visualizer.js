@@ -479,11 +479,15 @@ function updateRegionsToRemove(node) {
   const valueAdjustment = node.revealed && !node.has_mine ? 0 : -1
 
   for (const r of node.regions) {
-    r.region.nodes.splice(r.region.nodes.indexOf(node), 1)
+    const nidx = r.region.nodes.indexOf(node)
+    if (nidx !== -1) r.region.nodes.splice(nidx, 1)
+    else throw new Error("Node to remove not found?")
 
     // If region is now empty, remove it entirely.
     if (r.region.nodes.length === 0) {
-      regions.splice(regions.indexOf(r.region), 1)
+      const ridx = regions.indexOf(r.region)
+      if (ridx !== -1) regions.splice(ridx, 1)
+      else throw new Error("Empty region not in regions?")
       if (r.region.display) {
         r.region.display.g.remove()
       }
@@ -742,7 +746,9 @@ function trash_region(region) {
     // TODO This should never happen.
     //else throw new Error("Region not in display?")
   }
-  regions.splice(regions.indexOf(region), 1)
+  const ridx = regions.indexOf(region)
+  if (ridx !== -1) regions.splice(ridx, 1)
+  //else throw new Error("Trashed region not found")
   trashed_regions.push(region)
 }
 
