@@ -586,6 +586,7 @@ function displayRegion(region) {
     text.setAttribute('dominant-baseline', 'middle')
     text.setAttribute('text-anchor', 'middle')
     text.setAttribute('font-size', `1px`)
+    // TODO Only do this if it's too long?
     text.setAttribute('textLength', `0.8px`)
     text.setAttribute('lengthAdjust', `spacingAndGlyphs`)
 
