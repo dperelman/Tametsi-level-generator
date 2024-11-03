@@ -575,6 +575,42 @@ function displayRegion(region) {
   region.display.nodesAndEdges.forEach(ne => g.append(ne.layers));
 }
 
+let nextRegionId = 0
+function registerRegion(region) {
+  region.id = nextRegionId++
+  if (region.visible) {
+    displayRegion(region)
+  } else {
+    // Do not display hint regions, but still have backreferences.
+    for (const node of region.nodes) {
+      node.regions.push({region, layers: undefined, pos: undefined})
+    }
+  }
+
+  regions.push(region)
+}
+
+let regionQueue = [];
+function enqueRegion(region) {
+  if (region.priority === undefined) {
+    throw new Error("Region has no priority.");
+  }
+
+  const subQueue = regionQueue.find(q => q.priority === region.priority)
+  if (!subQueue) {
+    regionQueue.push({ priority: region.priority, queue: [region] })
+    regionQueue.sort((a, b) => b.priority - a.priority)
+  } else {
+    subQueue.queue.push(region)
+  }
+}
+
+function dequeRegion() {
+  const subQueue = regionQueue[0]
+  if (subQueue.queue.length === 1) regionQueue.shift()
+  return subQueue.queue.shift()
+}
+
 let regions = [];
 
 function generateRegionForNode(node) {
@@ -593,10 +629,11 @@ function generateRegionForNode(node) {
     nodes: coveredNodes,
     sourceKind: 'node',
     source: node,
+    visible: true,
+    priority: 3,
   }
 
-  regions.push(region)
-  displayRegion(region)
+  registerRegion(region)
 }
 
 function generateRegionForHint(hint) {
@@ -613,13 +650,11 @@ function generateRegionForHint(hint) {
     nodes: coveredNodes,
     sourceKind: 'hint',
     source: hint,
+    visible: false,
+    priority: 3,
   }
 
-  regions.push(region)
-  // Do not display hint regions, but still have backreferences.
-  for (const node of coveredNodes) {
-    node.regions.push({region, layers: undefined, pos: undefined})
-  }
+  registerRegion(region)
 }
 
 hints.color.forEach(generateRegionForHint)
@@ -894,6 +929,8 @@ function applyRegionRules() {
             nodes: nodesToApply,
             sourceKind: 'rule',
             source: {rule, predecessors: proposed},
+            visible: true,
+            priority: rule.bombe_rule.priority, // TODO Use region priorities?
           }
           const nodesSet = new Set(nodesToApply)
           // Check if region already exists
@@ -901,8 +938,7 @@ function applyRegionRules() {
           if (trashed_regions.findIndex(r => r.value === newRegion.value && r.kind === newRegion.kind && r.nodes.length === newRegion.nodes.length && nodesSet.isSubsetOf(new Set(r.nodes))) !== -1) continue
           // TODO Should region.nodes always be a Set?
 
-          regions.push(newRegion)
-          displayRegion(newRegion)
+          registerRegion(newRegion)
           fixupRegions() // TODO if calling this many times, maybe wait?
         }
       }
