@@ -517,6 +517,13 @@ function updateRegionsToRemove(node) {
 
     if (valueAdjustment) {
       r.region.value += valueAdjustment
+
+      if (r.region.value < 0) {
+        // TODO Is this right?
+        trash_region(r.region)
+        continue
+      }
+
       if (r.region.label) setRegionLabel(r.region)
     }
 
@@ -616,8 +623,12 @@ function registerRegion(region) {
 
   if (region.nodes.length === 0) return false
 
-  // TODO Is this right?
-  if (region.value < 0) region.value = 0
+  if (region.value < 0) {
+    // TODO Is this right? Probably not.
+    region.value = 0
+
+    return false
+  }
 
   if (isExistingRegion(region)) return false
 
@@ -1052,12 +1063,18 @@ function applyRegionRules(nextRegion) {
         if (nodesToApply.length === 0) continue
 
         if (rule.apply_region_type.kind === RegionKinds.MARK_CELL) {
+          const markKind = rule.apply_region_type.value === 0 ? 'reveal' : 'flag'
           enqueRegion({
             kind: RegionKinds.MARK_CELL,
-            markKind: rule.apply_region_type.value === 0 ? 'reveal' : 'flag',
+            markKind,
             nodes: nodesToApply,
             priority: 4,
           })
+          if (markKind === 'reveal' && nodesToApply.find(n => n.has_mine)) {
+            throw new Error("Reveal request for node with mine.")
+          } else if (markKind === 'flag' && nodesToApply.find(n => !n.has_mine)) {
+            throw new Error("Flag request for node without mine.")
+          }
         } else {
           const newRegionValue = rule.apply_region_type.value + rule.apply_region_type.vars.map(i => proposed.vars[i]).reduce((a, b) => a+b, 0)
           newRegion = {
