@@ -470,9 +470,30 @@ function fixupRegions() {
 }
 
 function setRegionLabel(region) {
-  region.label = region.kind === RegionKinds.EXACT
-    ? region.value.toString()
-    : region.kind.description.replace('X', region.value.toString())
+  let label;
+  const x = region.value
+  const exact = x.toString()
+  if (region.kind === RegionKinds.EXACT) {
+    label = exact
+  } else if (region.kind === RegionKinds.OR_PLUS_1) {
+    label = `${x}/${x+1}`
+  } else if (region.kind === RegionKinds.OR_PLUS_1_2) {
+    label = `${x}/${x+1}/${x+2}`
+  } else if (region.kind === RegionKinds.OR_PLUS_2) {
+    label = `${x}/${x+2}`
+  } else if (region.kind === RegionKinds.OR_PLUS_2_4) {
+    label = `${x}/${x+2}/${x+4}`
+  } else if (region.kind === RegionKinds.OR_PLUS_2_4_6) {
+    label = `${x}/${x+2}/${x+4}/${x+6}`
+  } else if (region.kind === RegionKinds.OR_PLUS_2_MULTIPLE) {
+    label = x === 0 ? "2*" : `${x}+2*`
+  } else if (region.kind === RegionKinds.OR_PLUS_3) {
+    label = `${x}/${x+3}`
+  } else {
+    label = region.kind.description.replace('X', exact)
+  }
+
+  region.label = label
 }
 
 function updateRegionsToRemove(node) {
