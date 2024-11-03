@@ -855,12 +855,16 @@ function _oneRegionStep() {
       } else if (nextRegion.kind === RegionKinds.MARK_CELL) {
         if (nextRegion.markKind === 'reveal') {
           for (const node of nextRegion.nodes) {
-            if (node.has_mine) throw new Error("Regions revealed a mine!")
+            if (node.has_mine) {
+              throw new Error("Regions revealed a mine!")
+            }
             setRevealed(node, true)
           }
         } else if (nextRegion.markKind === 'flag') {
           for (const node of nextRegion.nodes) {
-            if (!node.has_mine) throw new Error("Regions flagged a non-mine!")
+            if (!node.has_mine) {
+              throw new Error("Regions flagged a non-mine!")
+            }
             setFlagged(node, true)
           }
         } else {
