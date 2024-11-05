@@ -63,11 +63,16 @@ function setFlagged(node, flagged) {
   })
 }
 
+const lastPuzKey = "Tametsi-last-loaded-puzzle"
 let currentPuzzleData = undefined
 function loadPuzzle(puz) {
-  if (!puz) return
+  if (!puz) {
+    puz = localStorage.getItem(lastPuzKey)
+    if (!puz) return
+  }
 
   currentPuzzleData = puz
+  localStorage.setItem(lastPuzKey, currentPuzzleData)
   puzzle_data.innerText = currentPuzzleData
 
   // parse the puzzle
@@ -1138,7 +1143,61 @@ function applyRegionRules(nextRegion) {
   }
 }
 
-// TODO Load puzzle from file/localStorage
-loadPuzzle(data.puzzle.replace('\\n', '\n'))
+function loadFile() {
+  const element = document.createElement("input");
+  element.type = "file";
+  return new Promise((resolve, reject) => {
+    element.click();
+    element.addEventListener("change",
+      () => resolve(element.files[0]));
+    element.addEventListener("cancel",
+      () => reject("User canceled."));
+  });
+}
+function readText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = (e) => resolve(e.target.result);
+    reader.readAsText(file)
+  });
+}
+async function loadTextFile() {
+  return await readText(await loadFile())
+}
+
+loadPuzzle()
 
 $$('#reload-puzzle').addEventListener('click', () => loadPuzzle(currentPuzzleData))
+$$('#load-puzzle').addEventListener('click', async () => loadPuzzle(await loadTextFile()))
+
+// Required to make drop work.
+const dropTarget = document.body
+dropTarget.addEventListener("dragover", (e) => e.preventDefault());
+dropTarget.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  await Promise.allSettled([...e.dataTransfer.items]
+    .map(async (item) => {
+      if (item.getAsFileSystemHandle) {
+        await processFileSystemHandle(
+          await item.getAsFileSystemHandle());
+      } else {
+        await processFileSystemEntry(
+          item.webkitGetAsEntry());
+      }
+    })
+  );
+});
+
+async function processFileSystemHandle(handle) {
+  if (handle.kind === "file") {
+    loadPuzzle(await readText(await handle.getFile()))
+  }
+}
+
+async function processFileSystemEntry(entry) {
+  if (entry.isFile) {
+    const file = new Promise((resolve, reject) =>
+      entry.file(resolve, reject))
+    loadPuzzle(await readText(await file))
+  }
+}
