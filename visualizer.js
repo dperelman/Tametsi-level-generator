@@ -72,7 +72,6 @@ function loadPuzzle(puz) {
   }
 
   currentPuzzleData = puz
-  localStorage.setItem(lastPuzKey, currentPuzzleData)
   puzzle_data.innerText = currentPuzzleData
 
   // parse the puzzle
@@ -384,6 +383,9 @@ function loadPuzzle(puz) {
   svg.addEventListener('keydown', showNeighbors)
   svg.addEventListener('keyup', hideNeighbors)
   svg.focus()
+
+  // Save as current puzzle only after a successful load.
+  localStorage.setItem(lastPuzKey, currentPuzzleData)
 }
 
 const RegionKinds = Object.freeze({
@@ -740,7 +742,32 @@ function initializeRegions() {
   displayRegionDebugInfo()
 }
 
-function loadRules() {
+const lastRulesKey = "Bombe-last-loaded-rules"
+let currentRulesData = undefined
+
+let rules = undefined
+function loadRulesFromString(rulesString) {
+  if (!rulesString) {
+    rulesString = localStorage.getItem(lastRulesKey)
+    if (!rulesString) return rules = []
+  }
+
+  currentRulesData = rulesString
+
+  let rulesJson;
+  try {
+    rulesJson = JSON.parse(currentRulesData)
+  } catch {
+    rulesJson = JSON.parse(currentRulesData.substring(currentRulesData.indexOf('{')-1))
+  }
+
+  rules = loadRules(rulesJson)
+
+  // Only save rules if loading doesn't throw an exception.
+  localStorage.setItem(lastRulesKey, currentRulesData)
+}
+
+function loadRules(rules_from_bombe) {
   const varBitmasks = []
   for (let mask = 0; mask < (1 << 6); mask++) {
     const arr = []
@@ -772,9 +799,6 @@ function loadRules() {
     }
   }).filter(r => !r.bombe_rule.paused)
 }
-const rules = loadRules()
-const actionRules = rules.filter(r => r.priority === 3)
-const regionRules = rules.filter(r => r.priority !== 3)
 
 
 function hide_region(region) {
@@ -854,6 +878,7 @@ function enumerableVariableAssignments(args) {
 
 function displayRegionDebugInfo() {
   document.getElementById("regionDebugInfo").textContent = JSON.stringify({
+    numRules: rules.length,
     numRegions: regions.length,
     numVisibleRegions: regions.filter(r => r.visible).length,
     numHiddenRegions: regions.filter(r => !r.visible).length,
@@ -1164,11 +1189,25 @@ function readText(file) {
 async function loadTextFile() {
   return await readText(await loadFile())
 }
+function loadPuzzleOrRules(str) {
+  try {
+    loadRulesFromString(str)
+  } catch {
+    try {
+      loadPuzzle(str)
+    } catch {
+      // Not actually a puzzle or rules. Reload current puzzle.
+      loadPuzzle()
+    }
+  }
+}
 
+loadRulesFromString()
 loadPuzzle()
 
 $$('#reload-puzzle').addEventListener('click', () => loadPuzzle(currentPuzzleData))
 $$('#load-puzzle').addEventListener('click', async () => loadPuzzle(await loadTextFile()))
+$$('#load-rules').addEventListener('click', async () => loadRulesFromString(await loadTextFile()))
 
 // Required to make drop work.
 const dropTarget = document.body
@@ -1190,7 +1229,7 @@ dropTarget.addEventListener("drop", async (e) => {
 
 async function processFileSystemHandle(handle) {
   if (handle.kind === "file") {
-    loadPuzzle(await readText(await handle.getFile()))
+    loadPuzzleOrRules(await readText(await handle.getFile()))
   }
 }
 
@@ -1198,6 +1237,14 @@ async function processFileSystemEntry(entry) {
   if (entry.isFile) {
     const file = new Promise((resolve, reject) =>
       entry.file(resolve, reject))
-    loadPuzzle(await readText(await file))
+    loadPuzzleOrRules(await readText(await file))
   }
 }
+
+document.body.addEventListener('paste', () => {
+  event.preventDefault();
+
+  let paste = (event.clipboardData || window.clipboardData).getData("text");
+
+  loadPuzzleOrRules(paste)
+})
