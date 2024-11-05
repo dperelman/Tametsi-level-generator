@@ -119,7 +119,7 @@ function loadPuzzle(puz) {
   nodeIds = []
   let nodesSrc = extract(currentPuzzleData, 'NODE', /.+?/s, true)
   nodesSrc.forEach(nodeSrc => {
-    let nodeId = extract(nodeSrc, 'ID', /\d+/)
+    let nodeId = extract(nodeSrc, 'ID', /-?\d+/)
     let node = nodes[nodeId] = {}
 
     nodeIds.push(nodeId)
@@ -151,7 +151,7 @@ function loadPuzzle(puz) {
 
   colorHints.forEach(hintSrc => {
     let hint = {type: 'color'}
-    hint.ids = extract(hintSrc, 'IDS', /.+/).match(/\d+/g)
+    hint.ids = extract(hintSrc, 'IDS', /.+/).match(/-?\d+/g)
     hint.color = extract(hintSrc, 'COLOR', /.+/)
     hint.is_dark = realBool(extract(hintSrc, 'IS_DARK', /.+/)) ? 'dark' : ''
     hints.color.push(hint)
