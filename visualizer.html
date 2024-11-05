@@ -33,6 +33,8 @@
   </head>
   <body>
     <h3>Tametsi Puzzle Visualizer</h3>
+    <button id="load-puzzle" disabled>Load Puzzle</button>
+    <button id="reload-puzzle">Reload Puzzle</button>
 
     <p>(ID: <span id='puzzle-id'></span>)<br/><span id='puzzle-tile-text'></span>: "<strong><span id='puzzle-title'></span></strong>" by <span id='puzzle-author'></span><span id='puzzle-score'></span>
     </p>
@@ -46,36 +48,18 @@
     </svg>
 
     <button onclick="oneRegionStep();">Apply Next Rule</button>
+    <button onclick="startOrPauseRegions();">Start/Pause</button>
+    <input type="range" min=1 max=100 step=1 onchange="setSpeed(this);" />
+    <p>Debug:</p>
+    <p>(Node ID: <span id='node-id-display'></span>)</p>
     <div>
       <pre id="regionDebugInfo"></pre>
     </div>
-    <p>(Node ID: <span id='node-id-display'></span>)</p>
-    <table>
-      <tbody id='solution-steps'>
-        <tr id='controls'>
-          <td id='rewind'>◄◄ Rewind</td>
-          <td id='back'>◄ Back</td>
-          <td id='scroll'>[scroll]</td>
-          <td id='forward'>► Forward</td>
-          <td id='fast-forward'>►► Fast-forward</td>
-        </tr>
-        <tr>
-          <th>Round</th>
-          <th>Num ineqs</th>
-          <th>Stage</th>
-          <th>Revealed</th>
-          <th>Flagged</th>
-        </tr>
-      </tbody>
-    </table>
 
-    <p>Debug:</p>
     <pre id='debug'></pre>
 
     <p>Puzzle contents:</p>
     <pre id='puzzle-data' style='overflow: scroll;'></pre>
-    <p>Puzzle solution:</p>
-    <pre id='puzzle-soln'></pre>
 
     <script src="visualizer_data.js"></script>
     <script src="rule_data.js"></script>
